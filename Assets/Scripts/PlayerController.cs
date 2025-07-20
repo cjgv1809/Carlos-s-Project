@@ -1,83 +1,112 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class PlayerController : MonoBehaviour
 {
+    [Header("Movement")]
     public float velocity = 5f;
-    public float jumpForce = 10f;
-    public float bounceForce = 8f;
+    public float jumpForce = 7f;
     public float raycastLength = 0.1f;
     public LayerMask layerMask;
+
+    [Header("Combat")]
+    public int life = 3;
+    public float bounceForce = 5f;
+    public GameObject swordRange;
+
+    [Header("References")]
+    public Animator animator;
+
+    private Rigidbody2D rb;
     private bool isOnGround;
     private bool isReceivingDamage;
     private bool isAttacking;
-    private Rigidbody2D rb;
-    public Animator animator;
-    // Start is called before the first frame update
+
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
     }
 
-    // Update is called once per frame
     void Update()
+    {
+        HandleInput();
+        UpdateAnimations();
+        CheckFallOffMap();
+    }
+
+    private void HandleInput()
     {
         if (!isAttacking)
         {
-            Moving();
-            Jumping();
+            Move();
+            Jump();
         }
 
         if (isOnGround && !isAttacking && Input.GetKeyDown(KeyCode.F))
         {
             Attacking();
         }
-
-        animator.SetBool("isOnGround", isOnGround);
-        animator.SetBool("isReceivingDamage", isReceivingDamage);
-        animator.SetBool("isAttacking", isAttacking);
     }
 
-    public void Moving()
+    private void Move()
     {
-        float velocityX = Input.GetAxis("Horizontal") * Time.deltaTime * velocity;
+        float inputX = Input.GetAxis("Horizontal");
+        float velocityX = inputX * Time.deltaTime * velocity;
 
-        animator.SetFloat("movement", velocityX * velocity);
+        animator.SetFloat("movement", Mathf.Abs(velocityX * velocity));
 
-        if (velocityX < 0)
+        if (inputX != 0)
+            transform.localScale = new Vector3(Mathf.Sign(inputX), 1, 1);
+
+        if (!isReceivingDamage)
         {
-            transform.localScale = new Vector3(-1, 1, 1);
+            transform.position += new Vector3(velocityX, 0, 0);
         }
-        else if (velocityX > 0)
-        {
-            transform.localScale = new Vector3(1, 1, 1);
-        }
-
-        Vector3 position = transform.position;
-
-        if (!isReceivingDamage) transform.position = new Vector3(velocityX + position.x, position.y, position.z);
     }
 
-    public void Jumping()
+    private void Jump()
     {
         RaycastHit2D hit = Physics2D.Raycast(transform.position, Vector2.down, raycastLength, layerMask);
         isOnGround = hit.collider != null;
 
         if (isOnGround && Input.GetKeyDown(KeyCode.Space) && !isReceivingDamage)
         {
-            rb.AddForce(new Vector2(0f, jumpForce), ForceMode2D.Impulse);
+            rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
         }
     }
 
-    public void ReceivingDamage(Vector2 direction, int damageAmount)
+    private void CheckFallOffMap()
     {
-        if(!isReceivingDamage)
+        if (transform.position.y < -10f && !isReceivingDamage)
         {
-            isReceivingDamage = true;
-            Vector2 bounce = new Vector2(transform.position.x - direction.x, 0.2f).normalized;
-            rb.AddForce(bounce * bounceForce, ForceMode2D.Impulse);
+            if (AudioManager.Instance != null)
+            {
+                AudioManager.Instance.PlayGameOverSound();
+                AudioManager.Instance.StopBackgroundMusic();
+            }
+
+            GameManager.Instance.ShowGameOver();
+            gameObject.SetActive(false);
         }
+    }
+
+    private void UpdateAnimations()
+    {
+        animator.SetBool("isOnGround", isOnGround);
+        animator.SetBool("isReceivingDamage", isReceivingDamage);
+        animator.SetBool("isAttacking", isAttacking);
+    }
+
+    public void Attacking()
+    {
+        isAttacking = true;
+        swordRange.SetActive(true);
+    }
+
+    public void DeactivateAttack()
+    {
+        isAttacking = false;
+        swordRange.SetActive(false);
     }
 
     public void DeactivateDamage()
@@ -86,16 +115,51 @@ public class PlayerController : MonoBehaviour
         rb.velocity = Vector2.zero;
     }
 
-    public void Attacking()
+    public bool IsAttacking()
     {
-        isAttacking = true;
+        return isAttacking;
     }
 
-    public void DeactivateAttack()
+    public void ReceivingDamage(Vector2 direction, int damageAmount)
     {
-        isAttacking = false;
+        if (isReceivingDamage) return;
+
+        life -= damageAmount;
+
+        if (life <= 0)
+        {
+            Die();
+            return;
+        }
+
+        isReceivingDamage = true;
+        Vector2 bounce = new Vector2(transform.position.x - direction.x, 0.2f).normalized;
+        rb.AddForce(bounce * bounceForce, ForceMode2D.Impulse);
+
+        StartCoroutine(InvulnerabilityDelay(1f));
     }
-    
+
+    private IEnumerator InvulnerabilityDelay(float duration)
+    {
+        yield return new WaitForSeconds(duration);
+        isReceivingDamage = false;
+        rb.velocity = Vector2.zero;
+    }
+
+    private void Die()
+    {
+        Debug.Log("Jugador derrotado");
+
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayGameOverSound();
+            AudioManager.Instance.StopBackgroundMusic();
+        }
+
+        GameManager.Instance.ShowGameOver();
+        gameObject.SetActive(false);
+    }
+
     void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
